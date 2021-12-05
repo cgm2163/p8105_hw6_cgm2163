@@ -149,15 +149,112 @@ set.seed(1)
 
 ```
 
-We can now use the \bootstrap\ function to analyze this sample
+We can now use the \bootstrap\ function to analyze this sample.
+
+First, lets check out the log betas of the function
 
 ```{r}
 
 
+# boot strapping log
+
+boot_log = 
+ weather_df %>%
+  bootstrap(5000, id = "straps") %>%
+  mutate(
+    models = map(.x = strap, ~lm(tmax ~ tmin, data = .x)),
+    results = map(models, broom::tidy),
+    glances = map(models, broom::glance)) %>%
+  select(straps, results, glances) %>%
+  unnest(results, glances)
+
+# boot log
+
+log_b = 
+  boot_log %>%
+  select(straps, term, estimate) %>%
+  pivot_wider(
+    names_from = term,
+    values_from = estimate) %>%
+  rename(intercept = "(Intercept)") %>%
+  mutate(log_betas = log(intercept*tmin))
+
+
+# boot log plot
+
+log_b %>%
+  ggplot(aes(x = log_betas)) + geom_density()  + 
+    labs(
+      x = "log betas",
+      y = "density",
+      title = "log beta distribution"
+    )
+
+# print log b
+
+log_b %>%
+  knitr::kable(digits = 3)
+  
+
+
+```
+
+We can see above that the distribution of our log betas is approximately 
+normal.
+
+
+Now, lets look at our r-square distribution:
+
+```{r}
+
+# boot strapping r square
+
+boot_r_sq = 
+  weather_df %>%
+  janitor::clean_names() %>%
+  modelr::bootstrap(n = 5000, id = "straps") %>%
+  mutate(
+    model = map(.x = strap, ~lm(tmax ~ tmin, data = .x)))
+  
+
+# checking r square
+
+r_square = 
+  boot_r_sq %>%
+  mutate(
+    result = map(model, broom::glance)) %>%
+  unnest(result) %>%
+  select(r.squared, straps)
+
+
+# plot r square
+
+r_square %>%
+  ggplot(aes(x = r.squared)) + geom_density() + 
+    labs(
+      x = "r squared",
+      y = "density",
+      title = "r squared distribution"
+    )
+  
+# print r square 
+
+r_square %>%
+  knitr::kable(digits = 3)
+
+
+
+
+```
+
+We can see above that the distribution of our log betas is, similar to our r
+square distribution, approximately normal.
+
+
+```{r}
 
 # confidence interval
 
-ci_boot_weather =
 weather_df %>%
   bootstrap(n = 5000) %>%
   mutate(
@@ -171,35 +268,12 @@ weather_df %>%
     upper_ci = quantile(r_squared, c(0.975))) %>%
   knitr::kable(digits = 2)
 
-view(ci_boot_weather)
-
-
-
-
-
-ci_boot_weather = 
-  weather_df %>% 
-  bootstrap(n = 5000) %>% 
-  mutate(
-    models = map(strap, ~ lm(tmax ~ tmin, data = .x)),
-    results = map(models, broom::tidy)) %>%
-  select(-strap, -models) %>%
-  unnest(results) %>%
-  pivot_wider(
-    names_from = term,
-    values_from = estimate) %>%
-  rename(beta_0 = '(Intercept)', beta_1 = tmin) %>%
-  mutate(log_beta = log(beta_0*beta_1)) %>%
-  summarize(
-    lower = quantile(log_beta, c(0.025)),
-    upper = quantile(log_beta, c(0.975))) %>%
-  knitr::kable(digits = 2)
-
-
 
 ```
 
 
+We are 95% confident that the true r-squared value falls between 0.89 and 0.93,
+indicating that the model is a good fit for the data.
 
 
 
