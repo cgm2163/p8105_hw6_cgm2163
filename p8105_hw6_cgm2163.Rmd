@@ -1,0 +1,205 @@
+---
+title: "Homework 6"
+output: github_document
+---
+
+## Problem 1
+
+We can upload the birthweight data set after entering the tidyverse, making
+sure to clean the data set and convert relevant variables to factors.
+
+
+```{r}
+
+library(tidyverse)
+library(modelr)
+
+
+birthweight = read.csv("./birthweight.csv") %>%
+  janitor::clean_names() %>%
+  mutate(
+    babysex = as.factor(babysex),
+    frace = as.factor(frace),
+    malform = as.factor(malform),
+    mrace = as.factor(mrace))
+
+
+```
+
+Next, we can check to see if there are any missing values:
+
+```{r}
+
+sapply(birthweight, function(na) sum(is.na(na)))
+
+```
+
+We can see that there are `r sum(is.na(birthweight))` missing values, so we 
+don't need to take any measures to delete rows or cells. There are `r nrow(birthweight)` rows 
+and `r ncol(birthweight)` columns.
+
+Now we can make some regression models. In analyzing the variables available in 
+the data set, the ones I hypothesize would be the most effective predictors
+of birthweight are:
+\smoken\: average number of cigarettes smoked per day during pregnancy (mother's
+smoking history is a known risk factor for low birthweight, so I would expect
+an inverse relationship between cigarettes per day and birthweight in grams)
+\gaweeks\: gestational age in weeks (it would logically follow that babies born
+earlier in gestation would weigh less)
+\malform\: presence of malformations that could affect weight (again, logically
+it would track that babies with malformations that would affect weight would be
+on the smaller side)
+
+
+
+```{r}
+
+reg1 = lm(bwt ~ smoken + gaweeks + malform, data = birthweight)
+
+summary(reg1)
+
+```
+
+We can see above the summary model information for the regression model, but we can also create a plot of the residuals:
+
+```{r}
+
+birthweight %>%
+  modelr::add_predictions(reg1) %>%
+  modelr::add_residuals(reg1) %>%
+  ggplot(aes(x = pred, y = resid)) + geom_point() + geom_smooth(color = "blue",
+          method = "lm", se = FALSE) + labs(title = "Residuals vs. Predicted",
+            x = "Residuals", y = "Predicted values")
+
+
+```
+
+We can see that the residuals are roughly symmetrical and evenly dispersed 
+around y = 0.
+
+
+We can also work to make some models with other predictors:
+
+```{r}
+
+reg2 = lm(bwt ~ blength + gaweeks, data = birthweight)
+
+summary(reg2)
+
+reg3 = lm(bwt ~ blength * babysex * bhead, data = birthweight)
+
+summary(reg3)
+
+```
+
+Now, we can use the following function to compare and analyze further:
+
+```{r}
+
+cv_bw =
+  crossv_mc(birthweight, 100) %>%
+  mutate(
+    reg1 = map(train, ~lm(bwt ~ smoken + gaweeks + malform, data = .x)),
+    reg2 = map(train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+    reg3 = map(train, ~lm(bwt ~ blength * babysex * bhead, data = .x))) %>%
+  mutate(
+    rmse_reg1 = map2_dbl(.x = reg1, .y = test, ~rmse(model = .x, data = .y)),
+    rmse_reg2 = map2_dbl(.x = reg2, .y = test, ~rmse(model = .x, data = .y)),
+    rmse_reg3 = map2_dbl(.x = reg3, .y = test, ~rmse(model = .x, data = .y))
+  )
+
+
+cv_bw %>%
+  select(starts_with("rmse")) %>%
+  pivot_longer(
+    everything(),
+    names_to = "model",
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  ) %>%
+  ggplot(aes(x = model, y = rmse)) + geom_violin(color = "blue")
+
+
+```
+
+
+Model 3 has the smallest RMSE, and therefore it is our best choice for the model
+we go forward with.
+
+
+## Problem 2
+
+First, we can use the code chunk on the course website to analyze the NOAA data.
+
+```{r}
+
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+
+set.seed(1)
+
+```
+
+We can now use the \bootstrap\ function to analyze this sample
+
+```{r}
+
+
+
+# confidence interval
+
+ci_boot_weather =
+weather_df %>%
+  bootstrap(n = 5000) %>%
+  mutate(
+    models = map(strap, ~lm(tmax ~tmin, data = .x)),
+    results = map(models, broom::glance)) %>%
+  select(-strap, -models) %>%
+  unnest(results) %>%
+  janitor::clean_names() %>%
+  summarise(
+    lower_ci = quantile(r_squared, c(0.025)),
+    upper_ci = quantile(r_squared, c(0.975))) %>%
+  knitr::kable(digits = 2)
+
+view(ci_boot_weather)
+
+
+
+
+
+ci_boot_weather = 
+  weather_df %>% 
+  bootstrap(n = 5000) %>% 
+  mutate(
+    models = map(strap, ~ lm(tmax ~ tmin, data = .x)),
+    results = map(models, broom::tidy)) %>%
+  select(-strap, -models) %>%
+  unnest(results) %>%
+  pivot_wider(
+    names_from = term,
+    values_from = estimate) %>%
+  rename(beta_0 = '(Intercept)', beta_1 = tmin) %>%
+  mutate(log_beta = log(beta_0*beta_1)) %>%
+  summarize(
+    lower = quantile(log_beta, c(0.025)),
+    upper = quantile(log_beta, c(0.975))) %>%
+  knitr::kable(digits = 2)
+
+
+
+```
+
+
+
+
+
